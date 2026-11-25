@@ -167,24 +167,33 @@ class IdeController(private val context: Context) {
         versionName: String,
         minSdk: Int,
         targetSdk: Int,
+        onError: (String) -> Unit = {},
         onCreated: (ProjectInfo) -> Unit
     ) {
         executor.execute {
-            val project = projectRepo.createProject(
-                name = name,
-                packageName = packageName,
-                projectType = projectType,
-                primaryLanguage = primaryLanguage,
-                moduleName = moduleName,
-                versionName = versionName,
-                minSdk = minSdk,
-                targetSdk = targetSdk
-            )
-            mainHandler.post {
-                refreshProjects()
-                refreshStorageStats()
-                openProjectInternal(project)
-                onCreated(project)
+            try {
+                val project = projectRepo.createProject(
+                    name = name,
+                    packageName = packageName,
+                    projectType = projectType,
+                    primaryLanguage = primaryLanguage,
+                    moduleName = moduleName,
+                    versionName = versionName,
+                    minSdk = minSdk,
+                    targetSdk = targetSdk
+                )
+                mainHandler.post {
+                    refreshProjects()
+                    refreshStorageStats()
+                    openProjectInternal(project)
+                    onCreated(project)
+                }
+            } catch (e: Exception) {
+                mainHandler.post {
+                    val msg = "Erreur lors de la création : ${e.message ?: "inconnue"}"
+                    postMessage(msg)
+                    onError(msg)
+                }
             }
         }
     }

@@ -57,7 +57,7 @@ class EditorScreenView(
 
     private lateinit var emptyStateView: LinearLayout
     private lateinit var editorScrollView: ScrollView
-    private lateinit var gutterCol: LinearLayout
+    private lateinit var gutterView: LineNumberGutterView
     private lateinit var codeEditText: CursorAwareEditText
 
     private lateinit var cursorStatusText: TextView
@@ -67,13 +67,98 @@ class EditorScreenView(
 
     private lateinit var explorerOverlay: FileExplorerOverlay
 
-    private class CursorAwareEditText(
-        context: Context,
-        private val onCursorMoved: (Int) -> Unit
-    ) : EditText(context) {
+    private class CursorAwareEditText(context: Context) : EditText(context) {
+        var onCursorMoved: ((Int) -> Unit)? = null
+
         override fun onSelectionChanged(selStart: Int, selEnd: Int) {
             super.onSelectionChanged(selStart, selEnd)
-            onCursorMoved(selStart)
+            onCursorMoved?.invoke(selStart)
+        }
+    }
+
+    private class LineNumberGutterView(
+        context: Context,
+        private val palette: NasjePalette
+    ) : View(context) {
+        private var lineCount = 1
+        private var lineHeightPx = context.dp(20)
+        private var topPadPx = context.dp(10)
+        private var diagSeverityByLine: Map<Int, DiagnosticSeverity> = emptyMap()
+        private var linkedEditText: EditText? = null
+
+        private val textPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = FontKit.mono(context)
+            textAlign = android.graphics.Paint.Align.RIGHT
+            textSize = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_SP, 12f, context.resources.displayMetrics
+            )
+            color = palette.textMuted
+        }
+        private val dotPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            style = android.graphics.Paint.Style.FILL
+        }
+
+        fun bindEditor(editText: EditText) {
+            linkedEditText = editText
+        }
+
+        fun updateData(
+            lines: Int,
+            fontSizeSp: Float,
+            lineH: Int,
+            topPad: Int,
+            diags: Map<Int, DiagnosticSeverity>
+        ) {
+            lineCount = lines.coerceAtLeast(1)
+            lineHeightPx = lineH.coerceAtLeast(context.dp(16))
+            topPadPx = topPad
+            diagSeverityByLine = diags
+            textPaint.textSize = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_SP,
+                (fontSizeSp - 1f).coerceAtLeast(10f),
+                context.resources.displayMetrics
+            )
+            requestLayout()
+            invalidate()
+        }
+
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val digits = lineCount.toString().length.coerceAtLeast(2)
+            val charW = textPaint.measureText("0")
+            val desiredW = (context.dp(18) + digits * charW).toInt().coerceAtLeast(context.dp(44))
+            val editorH = linkedEditText?.height ?: 0
+            val contentH = topPadPx + lineCount * lineHeightPx + context.dp(120)
+            val desiredH = maxOf(editorH, contentH, MeasureSpec.getSize(heightMeasureSpec))
+            setMeasuredDimension(resolveSize(desiredW, widthMeasureSpec), resolveSize(desiredH, heightMeasureSpec))
+        }
+
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            super.onDraw(canvas)
+            val rightX = width - context.dp(8).toFloat()
+            val dotX = context.dp(6).toFloat()
+            val dotRadius = context.dp(2.5f.toInt()).toFloat().coerceAtLeast(3f)
+            val layout = linkedEditText?.layout
+            val fm = textPaint.fontMetrics
+
+            for (i in 0 until lineCount) {
+                val lineNum = i + 1
+                val baseline = if (layout != null && i < layout.lineCount) {
+                    (topPadPx + layout.getLineBaseline(i)).toFloat()
+                } else {
+                    (topPadPx + i * lineHeightPx - fm.ascent).toFloat()
+                }
+
+                val sev = diagSeverityByLine[lineNum]
+                if (sev != null) {
+                    val c = if (sev == DiagnosticSeverity.ERROR) palette.red else palette.amber
+                    dotPaint.color = c
+                    textPaint.color = c
+                    canvas.drawCircle(dotX, baseline + fm.ascent * 0.35f, dotRadius, dotPaint)
+                } else {
+                    textPaint.color = palette.textMuted
+                }
+                canvas.drawText(lineNum.toString(), rightX, baseline, textPaint)
+            }
         }
     }
 
@@ -349,13 +434,10 @@ class EditorScreenView(
             orientation = LinearLayout.HORIZONTAL
         }
 
-        gutterCol = LinearLayout(context).apply {
-            orientation = LinearLayout.VERTICAL
+        gutterView = LineNumberGutterView(context, palette).apply {
             setBackgroundColor(palette.gutterBg)
-            setPadding(context.dp(6), context.dp(10), context.dp(6), context.dp(10))
-            minimumWidth = context.dp(46)
         }
-        editorRow.addView(gutterCol, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        editorRow.addView(gutterView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT))
         editorRow.addView(View(context).apply {
             setBackgroundColor(palette.divider)
         }, LinearLayout.LayoutParams(context.dp(1), ViewGroup.LayoutParams.MATCH_PARENT))
@@ -363,9 +445,7 @@ class EditorScreenView(
         val codeHScroll = HorizontalScrollView(context).apply {
             isFillViewport = true
         }
-        codeEditText = CursorAwareEditText(context) { cursorPos ->
-            updateCursorStatus(cursorPos)
-        }.apply {
+        codeEditText = CursorAwareEditText(context).apply {
             tag = "code_editor_input"
             background = null
             gravity = Gravity.TOP or Gravity.START
@@ -376,8 +456,9 @@ class EditorScreenView(
                 InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI
             setTextColor(palette.textPrimary)
-            applyEditorTypography()
         }
+        applyEditorTypography()
+        gutterView.bindEditor(codeEditText)
 
         codeEditText.addTextChangedListener(object : TextWatcher {
             private var insertedNewlineAt = -1
@@ -473,6 +554,9 @@ class EditorScreenView(
         mainCol.addView(statusBar)
 
         addView(mainCol, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        codeEditText.onCursorMoved = { cursorPos ->
+            updateCursorStatus(cursorPos)
+        }
 
         explorerOverlay = FileExplorerOverlay(
             context = context,
@@ -544,6 +628,9 @@ class EditorScreenView(
                     codeEditText.setSelection(safeCursor)
                     lastLoadedFilePath = activeTab.filePath
                     lastLoadedTextVersion = activeTab.content
+                    codeEditText.post {
+                        rebuildGutter(codeEditText.text?.toString() ?: "")
+                    }
                 } finally {
                     suppressTextWatcher = false
                 }
@@ -657,42 +744,26 @@ class EditorScreenView(
     }
 
     private fun rebuildGutter(text: String) {
-        gutterCol.removeAllViews()
         val lineCount = text.count { it == '\n' } + 1
-        val diagsByLine = controller.uiState.activeFileDiagnostics.groupBy { it.line }
+        val diagsByLine = controller.uiState.activeFileDiagnostics
+            .groupBy { it.line }
+            .mapValues { (_, list) ->
+                if (list.any { it.severity == DiagnosticSeverity.ERROR }) DiagnosticSeverity.ERROR
+                else DiagnosticSeverity.WARNING
+            }
         val fontSize = controller.settings.editorFontSizeSp.toFloat()
         val lineH = codeEditText.lineHeight.takeIf { it > 0 } ?: context.dp(20)
-
-        for (lineNum in 1..lineCount) {
-            val lineDiags = diagsByLine[lineNum]
-            val dotColor = when {
-                lineDiags?.any { it.severity == DiagnosticSeverity.ERROR } == true -> palette.red
-                lineDiags?.any { it.severity == DiagnosticSeverity.WARNING } == true -> palette.amber
-                else -> Color.TRANSPARENT
-            }
-            val row = LinearLayout(context).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL or Gravity.END
-            }
-            if (dotColor != Color.TRANSPARENT) {
-                row.addView(
-                    View(context).apply { background = UiKit.roundedBox(context, dotColor, radiusDp = 4) },
-                    LinearLayout.LayoutParams(context.dp(5), context.dp(5)).apply { marginEnd = context.dp(3) }
-                )
-            }
-            val numTv = TextView(context).apply {
-                this.text = lineNum.toString()
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, (fontSize - 1f).coerceAtLeast(10f))
-                typeface = FontKit.mono(context)
-                setTextColor(if (dotColor != Color.TRANSPARENT) dotColor else palette.textMuted)
-                gravity = Gravity.END or Gravity.CENTER_VERTICAL
-            }
-            row.addView(numTv)
-            gutterCol.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, lineH))
-        }
+        gutterView.updateData(
+            lines = lineCount,
+            fontSizeSp = fontSize,
+            lineH = lineH,
+            topPad = codeEditText.paddingTop,
+            diags = diagsByLine
+        )
     }
 
     private fun updateCursorStatus(cursorIndex: Int) {
+        if (!::cursorStatusText.isInitialized) return
         val content = codeEditText.text?.toString() ?: ""
         val clamped = cursorIndex.coerceIn(0, content.length)
         val before = content.substring(0, clamped)

@@ -156,6 +156,7 @@ class CreateProjectScreenView(
         renderSdkChips()
 
         // Submit Button
+        var isSubmitting = false
         val submitBtn = UiKit.makeActionButton(
             context = context,
             label = "Créer et ouvrir le projet",
@@ -168,6 +169,8 @@ class CreateProjectScreenView(
             textSizeSp = 15f,
             tag = "create_project_submit"
         ) {
+            if (isSubmitting) return@makeActionButton
+            isSubmitting = true
             val name = nameInput.text.toString().trim().ifEmpty { "Mon Application" }
             val pkg = packageInput.text.toString().trim().ifEmpty { "com.nasje.myapp" }
             val mod = moduleInput.text.toString().trim().ifEmpty { "app" }
@@ -180,8 +183,10 @@ class CreateProjectScreenView(
                 moduleName = mod,
                 versionName = ver,
                 minSdk = selectedMinSdk,
-                targetSdk = selectedTargetSdk
+                targetSdk = selectedTargetSdk,
+                onError = { isSubmitting = false }
             ) {
+                isSubmitting = false
                 onProjectCreated()
             }
         }
