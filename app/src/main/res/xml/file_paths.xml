@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path name="nasje_builds" path="builds/" />
+    <files-path name="nasje_projects" path="projects/" />
+    <cache-path name="nasje_cache" path="/" />
+</paths>

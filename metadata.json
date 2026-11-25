@@ -1,0 +1,6 @@
+{
+  "name": "NASJE IDE",
+  "description": "Environnement de développement Android natif complet pour créer, éditer, configurer et compiler des applications Android en Java, Kotlin et C++.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
